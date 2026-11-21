@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: adaptlearn-fresh
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: MONGODB_DB
+        value: adaptlearn
+      - key: JWT_SECRET
+        generateValue: true
