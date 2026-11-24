@@ -1,27 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, BookOpen, Brain, ChartNoAxesCombined, Check, CircleHelp, Code2,
+  Activity, BookOpen, Brain, ChartNoAxesCombined, Check, Code2,
   Database, GraduationCap, LayoutDashboard, Lightbulb, LogIn, LogOut, RotateCcw,
   Sparkles, Target, X, Zap,
 } from 'lucide-react';
-import bank from '../questions.json';
 import './style.css';
 
 const topics = ['Python', 'SQL', 'Statistics', 'Logic'];
 const topicIcons = { Python: Code2, SQL: Database, Statistics: ChartNoAxesCombined, Logic: Brain };
 const letters = ['A', 'B', 'C', 'D'];
-const key = 'adaptlearn-attempts-v1';
-
-function readGuest() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(key) || '[]');
-    return Array.isArray(saved) ? saved.filter(row => row && topics.includes(row.topic)) : [];
-  } catch {
-    return [];
-  }
-}
-
 async function api(path, data) {
   const options = data === undefined ? {} : {
     method: 'POST',
@@ -29,9 +17,10 @@ async function api(path, data) {
     body: JSON.stringify(data),
   };
   const response = await fetch('/api/' + path, options);
-  const result = await response.json();
+  const result = await response.json().catch(() => null);
+  if (response.status === 401) throw Object.assign(new Error(result?.detail || 'Sign in to continue.'), { status: 401 });
   if (!response.ok) {
-    throw new Error(typeof result.detail === 'string' ? result.detail : 'Check the information you entered and try again.');
+    throw new Error(typeof result?.detail === 'string' ? result.detail : 'Check the information you entered and try again.');
   }
   return result;
 }
@@ -57,7 +46,7 @@ function nextQuestion(questions, attempts, topic) {
   return sorted.find(q => q.id !== attempts[0]?.question_id) || sorted[0];
 }
 
-function Practice({ questions, attempts, record, isGuest, initialTopic }) {
+function Practice({ questions, attempts, record, initialTopic }) {
   const [topic, setTopic] = useState(initialTopic);
   const [question, setQuestion] = useState(() => nextQuestion(questions, attempts, topic));
   const [choice, setChoice] = useState(null);
@@ -151,7 +140,6 @@ function Practice({ questions, attempts, record, isGuest, initialTopic }) {
           </> : <p>Answer a few questions to get a practice recommendation.</p>}
         </section>
         <section className="tip"><Sparkles size={18}/><div><strong>Learn from the miss.</strong><p>Read the feedback before moving to the next question.</p></div></section>
-        {isGuest && <div className="guest-note">Guest progress is saved in this browser.</div>}
       </aside>
     </div>
   </>;
@@ -227,22 +215,20 @@ function Progress({ attempts }) {
   </>;
 }
 
-function Tutor({ user, rows }) {
-  const authenticated = user?.role === 'tutor';
+function Tutor({ inviteCode }) {
   const [dashboard, setDashboard] = useState(null);
   const [live, setLive] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
-    if (!authenticated) return;
     let socket;
     let alive = true;
     let timer;
     async function refresh() {
       try {
         const data = await api('dashboard');
-        if (alive) { setDashboard(data); setError(''); }
+        if (alive) { setDashboard(data); setError(''); if (inviteCode) setLive(true); }
       } catch (problem) {
-        if (alive) setError(problem.message);
+        if (alive) { setError(problem.message); setLive(false); }
       }
     }
     function connect() {
@@ -258,22 +244,19 @@ function Tutor({ user, rows }) {
       };
     }
     refresh();
-    connect();
-    return () => { alive = false; clearTimeout(timer); socket?.close(); };
-  }, [authenticated]);
+    const poll = inviteCode ? setInterval(refresh, 5000) : null;
+    if (!inviteCode) connect();
+    return () => { alive = false; clearInterval(poll); clearTimeout(timer); socket?.close(); };
+  }, [inviteCode]);
 
-  const data = authenticated ? dashboard : {
-    topics: topics.map(topic => measure(rows, topic)),
-    recent: rows.slice(0, 10).map(row => ({ ...row, student: 'Guest learner' })),
-    students: Number(rows.length > 0), attempts: rows.length, correct: rows.filter(row => row.correct).length,
-    needs_review: topics.map(topic => measure(rows, topic)).filter(row => row.misses >= 2 && row.misses * 2 >= row.attempts).map(row => ({ ...row, student: 'Guest learner' })),
-  };
+  const data = dashboard;
 
   return <>
     <header className="page-heading"><div className="eyebrow"><span/> TUTOR WORKSPACE</div><h1>Tutor dashboard<span>.</span></h1>
-      <p>{authenticated ? 'Classroom activity from the latest 1,000 submissions.' : 'Preview the tutor dashboard using this browser’s guest attempts.'}</p>
+      <p>Classroom activity from the latest 1,000 submissions.</p>
     </header>
-    {authenticated && <p className="connection"><span className={live ? 'online' : ''}/>{live ? 'Live connection active' : 'Connecting to live activity…'}</p>}
+    <p className="connection"><span className={live ? 'online' : ''}/>{live ? 'Activity updates active' : 'Connecting to activity…'}</p>
+    {inviteCode && <p>Classroom invite code <code>{inviteCode}</code></p>}
     {error && <p className="error" role="alert">{error}</p>}
     {data && <>
       <div className="dashboard-stats">
@@ -303,6 +286,7 @@ function Tutor({ user, rows }) {
 
 function Login({ onClose, onSuccess }) {
   const [signup, setSignup] = useState(false);
+  const [role, setRole] = useState('student');
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   async function submit(event) {
@@ -325,65 +309,63 @@ function Login({ onClose, onSuccess }) {
   }, [onClose]);
 
   return <div className="modal-backdrop"><section className="panel modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
-    <div className="modal-top"><h2 id="login-title">{signup ? 'Create student account' : 'Sign in'}</h2><button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={20}/></button></div>
+    <div className="modal-top"><h2 id="login-title">{signup ? 'Create account' : 'Sign in'}</h2><button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={20}/></button></div>
     <form onSubmit={submit}>
       {signup && <label>Name<input name="name" autoComplete="name" minLength="2" maxLength="60" required autoFocus/></label>}
+      {signup && <label>Account type<select name="role" value={role} onChange={event => setRole(event.target.value)}>
+        <option value="student">Student</option><option value="tutor">Tutor</option>
+      </select></label>}
+      {signup && role === 'student' && <label>Tutor invite code (optional)<input name="invite_code" maxLength="32" autoComplete="off"/></label>}
       <label>Email<input name="email" type="email" autoComplete="email" required autoFocus={!signup}/></label>
       <label>Password<input name="password" type="password" autoComplete={signup ? 'new-password' : 'current-password'} minLength="10" maxLength="128" required/></label>
       {error && <p className="error" role="alert">{error}</p>}
       <button className="primary" disabled={pending}>{pending ? 'Please wait…' : signup ? 'Create account' : 'Sign in'}</button>
     </form>
-    <button className="text-button" onClick={() => { setSignup(!signup); setError(''); }}>{signup ? 'Use an existing account' : 'Create a student account'}</button>
+    <button className="text-button" onClick={() => { setSignup(!signup); setError(''); }}>{signup ? 'Use an existing account' : 'Create an account'}</button>
   </section></div>;
 }
 
 function App() {
-  const [guest, setGuest] = useState(readGuest);
   const [rows, setRows] = useState([]);
-  const [questions, setQuestions] = useState(bank);
+  const [questions, setQuestions] = useState([]);
   const [user, setUser] = useState(null);
   const [page, setPage] = useState('Student dashboard');
   const [practiceTopic, setPracticeTopic] = useState('All topics');
-  const [accounts, setAccounts] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [login, setLogin] = useState(false);
   const [error, setError] = useState('');
   const isTutor = user?.role === 'tutor';
-  const currentRows = user ? rows : guest;
 
-  async function begin(user) {
-    if (user.role === 'student') {
+  async function begin(account) {
+    if (account.role === 'student') {
       const [items, attempts] = await Promise.all([api('questions'), api('attempts')]);
       setQuestions(items);
       setRows(attempts);
     }
-    setUser(user);
+    setUser(account);
     setPracticeTopic('All topics');
-    setPage(user.role === 'tutor' ? 'Tutor dashboard' : 'Student dashboard');
+    setPage(account.role === 'tutor' ? 'Tutor dashboard' : 'Student dashboard');
     setLogin(false);
     setError('');
   }
 
-  useEffect(() => {
-    if (__SITES_PREVIEW__) return;
-    api('status').then(data => setAccounts(data.accounts)).catch(() => {});
-    api('me').then(begin).catch(() => {});
-  }, []);
+  async function loadAccount() {
+    setError('');
+    setLoading(true);
+    try {
+      await begin(await api('me'));
+    } catch (problem) {
+      if (problem.status !== 401) setError(problem.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify(guest)); } catch { /* Storage may be unavailable. */ }
-  }, [guest]);
+  useEffect(() => { loadAccount(); }, []);
 
   async function record(question, choice, submissionId) {
-    if (user) {
-      const row = await api('attempts', { question_id: question.id, choice, submission_id: submissionId });
-      setRows(previous => [row, ...previous].slice(0, 500));
-      return row;
-    }
-    const correct = question.correct === choice;
-    const row = { question_id: question.id, topic: question.topic, choice, correct,
-      hint: correct ? 'Good work. You applied the concept correctly.' : question.hints[choice],
-      source: correct ? 'Feedback' : 'Concept hint', created_at: new Date().toISOString() };
-    setGuest(previous => [row, ...previous].slice(0, 500));
+    const row = await api('attempts', { question_id: question.id, choice, submission_id: submissionId });
+    setRows(previous => [row, ...previous].slice(0, 500));
     return row;
   }
 
@@ -391,7 +373,7 @@ function App() {
     try {
       await api('logout', {});
       setUser(null);
-      setQuestions(bank);
+      setQuestions([]);
       setRows([]);
       setPracticeTopic('All topics');
       setPage('Student dashboard');
@@ -406,8 +388,23 @@ function App() {
   }
 
   const studentLinks = [['Student dashboard', LayoutDashboard], ['Practice', BookOpen], ['My progress', ChartNoAxesCombined]];
-  const links = isTutor ? [['Tutor dashboard', LayoutDashboard]] : studentLinks;
-  const navigation = user ? links : [...links, ['Tutor preview', GraduationCap]];
+  const navigation = isTutor
+    ? [['Tutor dashboard', LayoutDashboard]]
+    : studentLinks;
+
+  if (!user) return <main className="modal-backdrop">
+    <section className="panel modal sign-in">
+      <div className="brand"><span className="brand-icon"><GraduationCap size={24}/></span><h1>AdaptLearn</h1></div>
+      {loading ? <p role="status">Loading your workspace…</p> : error ? <>
+        <p className="error" role="alert">{error}</p>
+        <button className="primary" onClick={loadAccount}>Try again</button>
+      </> : <>
+        <p>Sign in to practice and save your progress.</p>
+        <button className="primary account-link" onClick={() => setLogin(true)}><LogIn size={16}/> Sign in or create an account</button>
+      </>}
+    </section>
+    {login && <Login onClose={() => setLogin(false)} onSuccess={begin}/>}
+  </main>;
 
   return <div className="app">
     <aside className="sidebar">
@@ -421,28 +418,23 @@ function App() {
         )}
       </nav>
       <div className="sidebar-bottom">
-        <div className="profile"><span className="avatar">{user ? user.name[0].toUpperCase() : <Zap size={16}/>}</span><div><strong>{user?.name || 'Guest learner'}</strong><small>{isTutor ? 'Tutor account' : user ? 'Student account' : 'Demo workspace'}</small></div></div>
+        <div className="profile"><span className="avatar">{user.name[0].toUpperCase()}</span><div><strong>{user.name}</strong><small>{isTutor ? 'Tutor account' : 'Student account'}</small></div></div>
       </div>
     </aside>
     <div className="workspace">
       <div className="topbar">
         <div className="breadcrumb">Workspace <span>/</span> <strong>{page}</strong></div>
-        {user
-          ? <button className="outline" onClick={signOut}><LogOut size={16}/> Sign out</button>
-          : accounts
-            ? <button className="outline" onClick={() => setLogin(true)}><LogIn size={16}/> Sign in</button>
-            : <div className="demo"><CircleHelp size={16}/> Guest demo</div>}
+        <button className="outline" onClick={signOut}><LogOut size={16}/> Sign out</button>
       </div>
       <main className="content">
         {error && <p role="alert" className="error">{error}</p>}
-        {!isTutor && page === 'Student dashboard' && <StudentDashboard name={user?.name} attempts={currentRows} onPractice={openPractice} onProgress={() => setPage('My progress')}/>}
-        {!isTutor && page === 'Practice' && <Practice key={(user ? 'student-' : 'guest-') + practiceTopic} questions={questions} attempts={currentRows} record={record} isGuest={!user} initialTopic={practiceTopic}/>}
-        {!isTutor && page === 'My progress' && <Progress attempts={currentRows}/>}
-        {((isTutor && page === 'Tutor dashboard') || (!user && page === 'Tutor preview')) && <Tutor user={user} rows={guest}/>}
+        {page === 'Student dashboard' && <StudentDashboard name={user.name} attempts={rows} onPractice={openPractice} onProgress={() => setPage('My progress')}/>}
+        {page === 'Practice' && <Practice key={practiceTopic} questions={questions} attempts={rows} record={record} initialTopic={practiceTopic}/>}
+        {page === 'My progress' && <Progress attempts={rows}/>}
+        {isTutor && page === 'Tutor dashboard' && <Tutor inviteCode={user.invite_code}/>}
         <footer>AdaptLearn <span>·</span> Inspired by tutoring students at Chegg India <a href="https://github.com/radheshyam1233/AdaptLearn" target="_blank" rel="noreferrer" aria-label="AdaptLearn source on GitHub">GitHub</a></footer>
       </main>
     </div>
-    {login && <Login onClose={() => setLogin(false)} onSuccess={begin}/>}
   </div>;
 }
 

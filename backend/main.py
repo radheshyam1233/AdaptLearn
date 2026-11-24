@@ -39,6 +39,8 @@ class Credentials(BaseModel):
 
 
 class Registration(Credentials):
+    role: Literal["student", "tutor"] = "student"
+    invite_code: str = Field(default="", max_length=32)
     name: str = Field(min_length=2, max_length=60, pattern=r"^\S.*\S$")
 
 
@@ -105,18 +107,23 @@ async def status():
 async def database():
     db = app.state.db
     if db is None:
-        raise HTTPException(503, "Accounts are unavailable. Guest practice is available.")
+        raise HTTPException(503, "Accounts are temporarily unavailable.")
     if not app.state.indexed:
         async with app.state.index_lock:
             if not app.state.indexed:
                 await run_in_threadpool(db.attempts.create_index, [("student_id", 1), ("created_at", DESCENDING)])
                 await run_in_threadpool(db.attempts.create_index, [("created_at", DESCENDING)])
+                await run_in_threadpool(db.attempts.create_index, [("classroom_id", 1), ("created_at", DESCENDING)])
+                await run_in_threadpool(db.users.create_index, "invite_code", unique=True, sparse=True)
                 app.state.indexed = True
     return db
 
 
 def public_user(user):
-    return {"name": user["name"], "role": user["role"]}
+    profile = {"name": user["name"], "role": user["role"]}
+    if user["role"] == "tutor" and user.get("invite_code"):
+        profile["invite_code"] = user["invite_code"]
+    return profile
 
 
 def session_user(token):
@@ -150,7 +157,7 @@ def require_student(user=Depends(require_user)):
 
 def start_session(response, user):
     now = int(time.time())
-    token = jwt.encode({"sub": user["_id"], **public_user(user), "iat": now, "exp": now + COOKIE_TTL},
+    token = jwt.encode({"sub": user["_id"], **public_user(user), "classroom_id": user.get("classroom_id"), "iat": now, "exp": now + COOKIE_TTL},
                        app.state.jwt_secret, algorithm="HS256")
     response.set_cookie(COOKIE_NAME, token, max_age=COOKIE_TTL, httponly=True, secure=app.state.secure,
                         samesite="strict", path="/api")
@@ -160,11 +167,21 @@ def start_session(response, user):
 @app.post("/api/register", status_code=201)
 def register(body: Registration, response: Response, db=Depends(database)):
     user = {"_id": body.email.lower(), "name": body.name.strip(),
-            "password": PASSWORD.hash(body.password), "role": "student"}
+            "password": PASSWORD.hash(body.password), "role": body.role}
+    invite_code = body.invite_code.strip().lower()
+    if body.role == "tutor":
+        user["invite_code"] = uuid4().hex
+    elif invite_code:
+        tutor = db.users.find_one({"invite_code": invite_code, "role": "tutor"}, {"_id": 1})
+        if tutor is None:
+            raise HTTPException(400, "This tutor invite code is invalid.")
+        user["classroom_id"] = tutor["_id"]
     try:
         db.users.insert_one(user)
     except DuplicateKeyError:
-        raise HTTPException(409, "This email is already registered.")
+        if db.users.find_one({"_id": user["_id"]}, {"_id": 1}):
+            raise HTTPException(409, "This email is already registered.")
+        raise HTTPException(503, "Could not create the account. Try again.")
     return start_session(response, user)
 
 
@@ -198,17 +215,16 @@ def questions(_user=Depends(require_student)):
 
 
 def public_attempt(attempt):
-    return {key: value for key, value in attempt.items() if key not in {"_id", "student_id", "student"}}
+    return {key: value for key, value in attempt.items() if key not in {"_id", "student_id", "student", "classroom_id"}}
 
 
-def recent_attempts(db, student_id=None, limit=500):
-    query = {"student_id": student_id} if student_id else {}
+def recent_attempts(db, query, limit=500):
     return list(db.attempts.find(query).sort("created_at", DESCENDING).limit(limit))
 
 
 @app.get("/api/attempts")
 def history(user=Depends(require_student), db=Depends(database)):
-    return [public_attempt(attempt) for attempt in recent_attempts(db, user["sub"])]
+    return [public_attempt(attempt) for attempt in recent_attempts(db, {"student_id": user["sub"]})]
 
 
 async def hint_for(question, choice):
@@ -252,6 +268,7 @@ async def submit(body: Answer, user=Depends(require_student), db=Depends(databas
         hint, source = await hint_for(question, body.choice)
     attempt = {"_id": attempt_id, "student_id": user["sub"], "student": user["name"],
                "question_id": body.question_id, "choice": body.choice, "topic": question["topic"],
+               "classroom_id": user.get("classroom_id"),
                "correct": correct, "hint": hint, "source": source,
                "created_at": datetime.now(timezone.utc).isoformat(timespec="microseconds")}
     try:
@@ -282,10 +299,13 @@ def summarize(rows):
 
 
 @app.get("/api/dashboard")
-async def dashboard(_tutor=Depends(require_tutor), db=Depends(database)):
+async def dashboard(tutor=Depends(require_tutor), db=Depends(database)):
+    # Provisioned tutors retain access to legacy attempts. Self-registered tutors see their classroom only.
+    classroom_id = tutor["sub"] if tutor.get("invite_code") else None
+    query = {"classroom_id": classroom_id} if classroom_id else {"classroom_id": {"$exists": False}}
     redis = app.state.redis
     revision = app.state.revision
-    key = f"{CACHE_KEY}:{app.state.cache_namespace}:{revision}"
+    key = f"{CACHE_KEY}:{app.state.cache_namespace}:{revision}:{classroom_id or 'legacy'}"
     if redis is not None:
         try:
             cached = await redis.get(key)
@@ -293,7 +313,7 @@ async def dashboard(_tutor=Depends(require_tutor), db=Depends(database)):
                 return json.loads(cached)
         except (RedisError, ValueError):
             pass
-    payload = summarize(await run_in_threadpool(recent_attempts, db, None, 1000))
+    payload = summarize(await run_in_threadpool(recent_attempts, db, query, 1000))
     if redis is not None and revision == app.state.revision:
         try:
             await redis.set(key, json.dumps(payload), ex=25)
@@ -307,7 +327,7 @@ async def live(websocket: WebSocket):
     user = session_user(websocket.cookies.get(COOKIE_NAME))
     host = websocket.headers.get("host", "")
     origin = websocket.headers.get("origin")
-    if not user or user["role"] != "tutor" or origin not in {f"https://{host}", f"http://{host}"}:
+    if not user or user["role"] != "tutor" or user.get("invite_code") or origin not in {f"https://{host}", f"http://{host}"}:
         await websocket.close(code=1008)
         return
     await websocket.accept()

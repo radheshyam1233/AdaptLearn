@@ -15,7 +15,7 @@ That led me to a question. If answers are easy to get, what still helps students
 - **My progress** shows accuracy, coverage, and review priority. Recent mistakes contribute more to review priority than older mistakes.
 - **Tutor dashboard** opens after tutor sign-in and uses the latest 1,000 attempts for concept error rates, recent activities, and learner review flags. A learner appears in the review list after at least two misses and a 50% or greater error rate for a topic.
 
-React and Vite provide the UI. FastAPI grades account submissions and authenticates students and tutors with JWTs in HTTP-only cookies. MongoDB stores accounts and attempts. WebSockets refresh tutor dashboards as students submit answers. The optional Redis cache expires after 25 seconds and a new attempt advances the cache revision. Run one API process for the current live-event and cache design. Optional OpenAI calls generate wrong-answer hints using the question and selected option. If the call fails or takes too long, a curated hint remains available. Guest practice uses curated hints and saves progress in the current browser.
+React and Vite provide the UI. FastAPI grades account submissions and authenticates students and tutors with JWTs in HTTP-only cookies. MongoDB stores accounts and attempts. WebSockets refresh tutor dashboards as students submit answers. The optional Redis cache expires after 25 seconds and a new attempt advances the cache revision. Run one API process for the current live-event and cache design. Optional OpenAI calls generate wrong-answer hints using the question and selected option. If the call fails or takes too long, a curated hint remains available. Students and tutors sign in with an AdaptLearn account.
 
 ## Run locally
 
@@ -26,7 +26,7 @@ Install Node.js 22 and Python 3.12. Copy .env.example to .env, add a JWT secret 
     python -m pip install -r backend/requirements.txt
     python -m uvicorn backend.main:app --env-file .env --port 8000
 
-Open http://localhost:8000, or http://localhost:8000/api/docs for the API reference. For a Docker build, run docker build -t adaptlearn . and docker run --env-file .env -p 8000:10000 adaptlearn. The app also boots without database settings in guest mode.
+Open http://localhost:8000, or http://localhost:8000/api/docs for the API reference. For a Docker build, run docker build -t adaptlearn . and docker run --env-file .env -p 8000:10000 adaptlearn. MongoDB and a JWT secret are required for account access.
 
 ## Deploy to Render and MongoDB Atlas
 
@@ -34,21 +34,21 @@ Open http://localhost:8000, or http://localhost:8000/api/docs for the API refere
 2. In Atlas, create or select a cluster and create a dedicated database user with readWrite access to adaptlearn. Copy the driver connection URI from that cluster. Use your database user's credentials and URL-encode reserved characters in them.
 3. Open the Render service's **Connect → Outbound** tab. Add its outbound CIDR ranges to the Atlas project's IP access list.
 4. In Render under **Environment**, add MONGODB_URI with the complete URI. MONGODB_DB defaults to adaptlearn. Save and deploy. Keep these values out of Git and chat.
-5. Check that /health returns {"status":"ok"} and /api/status returns {"accounts":true}. Register a student and check that sign-in opens the Student dashboard. Submit an answer and reload to confirm the attempt persists. Sign into a provisioned tutor account in a separate browser window and confirm it opens the Tutor dashboard and updates after a new student submission.
+5. Check that /health returns {"status":"ok"} and /api/status returns {"accounts":true}. Register a student and check that sign-in opens the Student dashboard. Submit an answer and reload to confirm the attempt persists. Create a tutor account and note its invite code. Create a student account with that code in a separate browser window, submit an answer, and confirm the tutor dashboard updates.
 6. Optionally set OPENAI_API_KEY and REDIS_URL (redis:// or rediss://). The app labels curated hints and AI hints separately. The free Render service can take time to wake up after inactivity.
 
 Official setup references are [Render Blueprints](https://render.com/docs/blueprint-spec), [Render outbound IP addresses](https://render.com/docs/outbound-ip-addresses), and [MongoDB Atlas and Render](https://www.mongodb.com/docs/atlas/reference/partner-integrations/render/).
 
-### Provision a tutor
+### Student and tutor accounts
 
-Register the tutor as a student first. As an authorized Atlas administrator, use Atlas Data Explorer or mongosh to update that person's users record in adaptlearn. The _id is their lowercase email and role must be set to tutor. The tutor must sign out and sign back in for the new role to take effect. Public signup always creates student accounts.
+Choose **Student** or **Tutor** when creating an account. New tutors get an invite code on their dashboard. Students can enter the code at signup to join that tutor's classroom. Tutors see activity from their own classroom, and students can practice independently without a code. Previously provisioned tutors retain access to historical attempts.
 
 ## Résumé features and acceptance checks
 
 | Résumé focus | Implementation and acceptance check |
 | --- | --- |
 | Full-stack learning platform with React.js, FastAPI, PostgreSQL, JWT auth and role-based access | The rebuild uses MongoDB Atlas for storage. Verify that a student signs in to a personal dashboard and can read only their own history. A tutor signs in to the tutor dashboard and can read classroom analytics. Protected API routes reject the other role. |
-| OpenAI API analysis of wrong answers, personalised hints and weak concept tracking | Set OPENAI_API_KEY, submit an incorrect answer and check for an AI hint. Wrong answers increase the review priority for that topic. The student dashboard recommends the topic with the highest current review priority. Curated hints cover guest practice and provider failures. |
+| OpenAI API analysis of wrong answers, personalised hints and weak concept tracking | Set OPENAI_API_KEY, submit an incorrect answer and check for an AI hint. Wrong answers increase the review priority for that topic. The student dashboard recommends the topic with the highest current review priority. Curated hints cover provider failures. |
 | Live tutor dashboard using WebSockets, Redis caching and Docker deployment | With REDIS_URL configured, verify a repeat dashboard request uses the cache. Leave the tutor dashboard open and submit a student answer in another browser session. Verify a live refresh includes the new attempt and invalidates the previous cache entry. Use the Dockerfile and Render Blueprint for hosting. |
 
 Describe storage as MongoDB Atlas when referring to the rebuild. Measure dashboard latency with and without Redis on the deployed service before citing a speed improvement.

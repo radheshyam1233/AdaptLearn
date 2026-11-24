@@ -39,7 +39,7 @@ h1, h2, p { margin: 0; }
 .breadcrumb { color: var(--muted); font-size: .89rem; }
 .breadcrumb span { padding: 0 9px; color: #8586a1; }
 .breadcrumb strong { color: #f0ebff; font-weight: 600; }
-.outline, .demo { border: 1px solid #3b3b52; background: #1e1e30; color: #dcd5fb; display: flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 7px; font-size: .875rem; white-space: nowrap; }
+.outline { border: 1px solid #3b3b52; background: #1e1e30; color: #dcd5fb; display: flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 7px; font-size: .875rem; white-space: nowrap; }
 .outline:hover { background: #30274a; }
 .content { max-width: 1430px; margin: 0 auto; padding: 40px clamp(23px, 4vw, 54px) 24px; }
 .eyebrow { color: #c8b7ff; font-size: .76rem; letter-spacing: .13em; font-weight: 730; display: flex; align-items: center; gap: 8px; }
@@ -93,7 +93,6 @@ fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width:
 .tip { display: flex; align-items: flex-start; gap: 9px; padding: 13px 14px; color: #daccff; background: #28213d; border: 1px solid #493761; border-radius: 9px; }
 .tip strong { font-size: .91rem; }
 .tip p { margin-top: 3px; }
-.guest-note { color: var(--muted); font-size: .8rem; padding-left: 2px; }
 footer { margin-top: 28px; padding: 14px 0 0; border-top: 1px solid #2c2d3e; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: #aaa8bf; font-size: .81rem; }
 footer a { display: inline-flex; padding: 2px; }
 .progress-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; margin-top: 27px; }
@@ -124,7 +123,7 @@ footer a { display: inline-flex; padding: 2px; }
 .modal-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .modal form { display: grid; gap: 12px; }
 .modal label { display: grid; gap: 5px; }
-.modal input { background: #151521; border: 1px solid #4a4762; color: #f5f0ff; padding: 9px; border-radius: 7px; }
+.modal input, .modal select { background: #151521; border: 1px solid #4a4762; color: #f5f0ff; padding: 9px; border-radius: 7px; }
 .modal > .text-button { margin-top: 8px; }
 @media (max-width: 1060px) {
   .app { grid-template-columns: 193px minmax(0, 1fr); }
@@ -155,3 +154,8 @@ footer a { display: inline-flex; padding: 2px; }
 .student-card { min-height: 174px; }
 .student-card .section-heading h2 { margin: 0; }
 .student-card .muted { margin-top: 12px; }
+
+.sign-in .brand { margin-bottom: 14px; }
+.sign-in h1 { font-size: 1.5rem; margin: 0; }
+.sign-in p { margin: 0 0 16px; }
+.account-link { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
