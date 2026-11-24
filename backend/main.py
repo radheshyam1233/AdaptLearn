@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from pwdlib import PasswordHash
 from pymongo import DESCENDING, MongoClient
-from pymongo.errors import DuplicateKeyError, PyMongoError
+from pymongo.errors import DuplicateKeyError, OperationFailure, PyMongoError, ServerSelectionTimeoutError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from starlette.responses import JSONResponse
@@ -56,6 +56,7 @@ async def lifespan(app):
     app.state.jwt_secret = os.getenv("JWT_SECRET", "")
     app.state.secure = os.getenv("COOKIE_SECURE", "true").lower() != "false"
     app.state.db = None
+    app.state.last_database_problem = None
     app.state.indexed = False
     app.state.index_lock = asyncio.Lock()
     app.state.redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True, socket_timeout=0.5,
@@ -68,6 +69,8 @@ async def lifespan(app):
                          socketTimeoutMS=5500) if uri else None
     if client is not None and len(app.state.jwt_secret) >= 32:
         app.state.db = client[os.getenv("MONGODB_DB", "adaptlearn")]
+    if app.state.db is None:
+        LOG.warning("Account storage unavailable: MongoDB URI missing or JWT secret shorter than 32 characters")
     try:
         yield
     finally:
@@ -99,8 +102,18 @@ async def status():
         try:
             await run_in_threadpool(app.state.db.command, "ping")
             connected = True
-        except PyMongoError:
-            pass
+        except PyMongoError as error:
+            if isinstance(error, OperationFailure) and error.code in {13, 18, 8000}:
+                problem = "database authentication or permission rejected"
+            elif isinstance(error, ServerSelectionTimeoutError):
+                problem = "no database server reachable before timeout"
+            else:
+                problem = type(error).__name__
+            if problem != app.state.last_database_problem:
+                LOG.warning("Account storage unavailable: %s", problem)
+                app.state.last_database_problem = problem
+        else:
+            app.state.last_database_problem = None
     return {"accounts": connected}
 
 
