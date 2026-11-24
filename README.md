@@ -1,5 +1,9 @@
 # AdaptLearn | AI-Powered Adaptive Learning Platform
 
+**[Live Demo](https://adaptlearn-fresh.onrender.com/)**
+
+Create a **Student** account to try adaptive practice, or a **Tutor** account to open the classroom dashboard and get an invite code. The first visit after inactivity can take about a minute while Render Free wakes up.
+
 AdaptLearn helps students understand why they got an answer wrong and gives tutors a live view of where learners are struggling. It covers Python, SQL, statistics, and logic.
 
 ## Why I built this
@@ -13,9 +17,9 @@ That led me to a question. If answers are easy to get, what still helps students
 - **Student dashboard** opens after student sign-in. It shows the learner’s own attempts, accuracy, recent feedback and a recommended topic.
 - **Practice** gives feedback tailored to the selected answer and recommends questions based on each topic's recent mistakes.
 - **My progress** shows accuracy, coverage, and review priority. Recent mistakes contribute more to review priority than older mistakes.
-- **Tutor dashboard** opens after tutor sign-in and uses the latest 1,000 attempts for concept error rates, recent activities, and learner review flags. A learner appears in the review list after at least two misses and a 50% or greater error rate for a topic.
+- **Tutor dashboard** opens after tutor sign-in and uses the latest 1,000 attempts in the tutor's classroom for concept error rates, recent activities, and learner review flags. A learner appears in the review list after at least two misses and a 50% or greater error rate for a topic.
 
-React and Vite provide the UI. FastAPI grades account submissions and authenticates students and tutors with JWTs in HTTP-only cookies. MongoDB stores accounts and attempts. WebSockets refresh tutor dashboards as students submit answers. The optional Redis cache expires after 25 seconds and a new attempt advances the cache revision. Run one API process for the current live-event and cache design. Optional OpenAI calls generate wrong-answer hints using the question and selected option. If the call fails or takes too long, a curated hint remains available. Students and tutors sign in with an AdaptLearn account.
+React and Vite provide the UI. FastAPI grades account submissions and authenticates students and tutors with JWTs in HTTP-only cookies. MongoDB stores accounts and attempts. Tutor dashboards for invite-based classrooms refresh every five seconds. Existing provisioned tutors use WebSocket updates for historical activity. The optional Redis cache expires after 25 seconds and a new attempt advances the cache revision. Run one API process for the current live-event and cache design. Optional OpenAI calls generate wrong-answer hints using the question and selected option. If the call fails or takes too long, a curated hint remains available. Students and tutors sign in with an AdaptLearn account.
 
 ## Run locally
 
@@ -30,7 +34,7 @@ Open http://localhost:8000, or http://localhost:8000/api/docs for the API refere
 
 ## Deploy to Render and MongoDB Atlas
 
-1. In Render, create a Blueprint from this repository. Select the render-rebuild branch. The Blueprint provisions one free Docker web service and generates JWT_SECRET. Render serves the React build and API from the same URL.
+1. In Render, create a Blueprint from this repository. Select the main branch. The Blueprint provisions one free Docker web service and generates JWT_SECRET. Render serves the React build and API from the same URL.
 2. In Atlas, create or select a cluster and create a dedicated database user with readWrite access to adaptlearn. Copy the driver connection URI from that cluster. Use your database user's credentials and URL-encode reserved characters in them.
 3. Open the Render service's **Connect → Outbound** tab. Add its outbound CIDR ranges to the Atlas project's IP access list.
 4. In Render under **Environment**, add MONGODB_URI with the complete URI. MONGODB_DB defaults to adaptlearn. Save and deploy. Keep these values out of Git and chat.
@@ -47,8 +51,6 @@ Choose **Student** or **Tutor** when creating an account. New tutors get an invi
 
 | Résumé focus | Implementation and acceptance check |
 | --- | --- |
-| Full-stack learning platform with React.js, FastAPI, PostgreSQL, JWT auth and role-based access | The rebuild uses MongoDB Atlas for storage. Verify that a student signs in to a personal dashboard and can read only their own history. A tutor signs in to the tutor dashboard and can read classroom analytics. Protected API routes reject the other role. |
+| Full-stack learning platform with React, FastAPI, MongoDB Atlas, JWT auth and role-based access | Verify that a student signs in to a personal dashboard and can read only their own history. A tutor signs in to the tutor dashboard and can read classroom analytics. Protected API routes reject the other role. |
 | OpenAI API analysis of wrong answers, personalised hints and weak concept tracking | Set OPENAI_API_KEY, submit an incorrect answer and check for an AI hint. Wrong answers increase the review priority for that topic. The student dashboard recommends the topic with the highest current review priority. Curated hints cover provider failures. |
-| Live tutor dashboard using WebSockets, Redis caching and Docker deployment | With REDIS_URL configured, verify a repeat dashboard request uses the cache. Leave the tutor dashboard open and submit a student answer in another browser session. Verify a live refresh includes the new attempt and invalidates the previous cache entry. Use the Dockerfile and Render Blueprint for hosting. |
-
-Describe storage as MongoDB Atlas when referring to the rebuild. Measure dashboard latency with and without Redis on the deployed service before citing a speed improvement.
+| Tutor dashboard updates, optional Redis caching, and Docker deployment | With REDIS_URL configured, verify a repeat dashboard request uses the cache. Leave the tutor dashboard open and submit a student answer in another browser session. Verify a live refresh includes the new attempt and invalidates the previous cache entry. Use the Dockerfile and Render Blueprint for hosting. |
